@@ -76,6 +76,7 @@ typedef struct ASTNode {
   Redirection *redirs;
 } ASTNode;
 
+char *process_quotes(const char *word);
 ASTNode *parse_sequence();
 void print_ast(ASTNode *node, int depth);
 

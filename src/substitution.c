@@ -15,7 +15,6 @@
 #include "builtins.h"
 #include "execute.h"
 #include "input.h"
-#include "prompt.h"
 #include "tokenizer.h"
 
 extern int debug_substitution;

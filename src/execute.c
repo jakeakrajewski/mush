@@ -16,7 +16,6 @@
 #include "execute.h"
 #include "input.h"
 #include "launch.h"
-#include "prompt.h"
 #include "substitution.h"
 #include "tokenizer.h"
 #include "job_control.h"
@@ -248,7 +247,10 @@ int exec_command_node(ASTNode *node, int silent) {
       }
       free(output);
     } else {
-      argv[argc++] = strdup(node->args[i].text);
+      
+      char *processed = process_quotes(node->args[i].text);
+      argv[argc++] = processed;  // Don't strdup again, process_quotes already allocates
+
     }
   }
   argv[argc] = NULL;
@@ -287,7 +289,6 @@ char **ast_to_argv(ASTNode *node) {
 
     for (int i = 0; i < node->argc; i++) {
         if (node->args[i].is_substitution) {
-            // You might want to handle substitution here, but for now:
             argv[i] = strdup("SUBST"); // placeholder
         } else {
             argv[i] = strdup(node->args[i].text);
@@ -330,7 +331,7 @@ job *create_job_from_ast(ASTNode *node) {
 
     // Convert AST command to process list
     process *p = calloc(1, sizeof(process));
-    p->argv = ast_to_argv(node); // reuse your exec_command_node logic
+    p->argv = ast_to_argv(node); 
     p->next = NULL;
 
     j->first_process = p;
@@ -343,8 +344,7 @@ job *create_job_from_ast(ASTNode *node) {
 
 int exec_job_node(ASTNode *node, int silent) {
     // Background job means run the child node without waiting.
-    // Build a job struct from it.
-    job *j = create_job_from_ast(node->left); // You'll need this helper
+    job *j = create_job_from_ast(node->left); 
     if (!j) {
         if (!silent)
             fprintf(stderr, "mu: failed to create job\n");
@@ -398,7 +398,7 @@ int mu_execute_logical_commands(char *line) {
   tokenize(line);
   ASTNode *tree = parse_sequence();
 
-  print_ast(tree, 0);
+  // print_ast(tree, 0);
   if (!tree) {
     fprintf(stderr, "mu: parse error\n");
     return 1;

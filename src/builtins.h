@@ -1,13 +1,10 @@
-// Add this to your builtins.h file
-
 #ifndef BUILTINS_H
 #define BUILTINS_H
 
 // External declarations for variables defined in main.c/job.c
 extern int shell_is_interactive;
-extern struct job *first_job; // You'll also need this for fg/bg commands
+extern struct job *first_job; 
 
-// Forward declaration for job struct (so you don't need to include job.h)
 struct job;
 
 // Builtin function declarations

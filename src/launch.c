@@ -14,7 +14,6 @@
 
 #include "builtins.h"
 #include "input.h"
-#include "prompt.h"
 #include "substitution.h"
 #include "tokenizer.h"
 

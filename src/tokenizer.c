@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+char *process_quotes(const char *word);
+
 typedef enum {
   TOKEN_WORD,
   TOKEN_AND,
@@ -38,6 +40,31 @@ int pos = 0;
 
 void add_token(TokenType type, const char *text) {
   tokens[token_count++] = (Token){type, strdup(text)};
+}
+
+char *expand_tilde(const char *word) {
+    if (word[0] != '~') {
+        return strdup(word);
+    }
+    
+    char *home = getenv("HOME");
+    if (!home) {
+        return strdup(word);  // If no HOME, return as-is
+    }
+    
+    if (word[1] == '\0' || word[1] == '/') {
+        // Handle ~ or ~/path
+        size_t home_len = strlen(home);
+        size_t word_len = strlen(word);
+        char *result = malloc(home_len + word_len);  // word_len includes the ~
+        strcpy(result, home);
+        if (word[1] == '/') {
+            strcat(result, word + 1);  // Skip the ~ but keep the /
+        }
+        return result;
+    }
+    
+    return strdup(word);
 }
 
 void tokenize(const char *input) {
@@ -180,14 +207,41 @@ void tokenize(const char *input) {
       input++;
     } else {
       const char *start = input;
-      while (*input && !isspace(*input) && *input != ';' && *input != '|' &&
-             *input != '(' && *input != ')' && *input != '!')
-        input++;
+      int in_single_quote = 0;
+      int in_double_quote = 0;
 
-      if (start != input) {
-        char *word = strndup(start, input - start);
-        add_token(TOKEN_WORD, word);
-        free(word);
+      while (*input && (in_single_quote || in_double_quote ||
+                        (!isspace(*input) && *input != ';' && *input != '|' &&
+                         *input != '(' && *input != ')' && *input != '!' &&
+                         *input != '&' && *input != '<' && *input != '>'))) {
+
+        if (*input == '\'' && !in_double_quote) {
+          in_single_quote = !in_single_quote;
+        } else if (*input == '"' && !in_single_quote) {
+          in_double_quote = !in_double_quote;
+        } else if (*input == '\\' && !in_single_quote) {
+          // Skip escaped character
+          input++;
+          if (*input)
+            input++;
+          continue;
+        }
+        input++;
+      }
+
+      if (in_single_quote || in_double_quote) {
+        fprintf(stderr, "mu: unterminated quoted string\n");
+        return;
+      }
+
+     if (start != input) {
+          char *raw_word = strndup(start, input - start);
+          char *processed_word = process_quotes(raw_word);
+          char *expanded_word = expand_tilde(processed_word);
+          add_token(TOKEN_WORD, expanded_word);
+          free(raw_word);
+          free(processed_word);
+          free(expanded_word);
       }
     }
   }
@@ -404,9 +458,11 @@ ASTNode *parse_command() {
 
       Token *file_tok = consume();
 
+      char *expanded_filename = expand_tilde(file_tok->text);
+
       Redirection *r = malloc(sizeof(Redirection));
       r->fd = fd;
-      r->filename = strdup(file_tok->text);
+      r->filename = expanded_filename;
       r->next = NULL;
 
       switch (redir_tok) {
@@ -592,6 +648,56 @@ ASTNode *parse_sequence() {
   }
 
   return left;
+}
+
+
+
+char *process_quotes(const char *word) {
+  size_t len = strlen(word);
+  char *result = malloc(len + 1); // worst case same length
+  size_t out_pos = 0;
+  size_t i = 0;
+
+  while (i < len) {
+    if (word[i] == '\'') {
+      // Single quotes: everything literal until closing quote
+      i++; // skip opening quote
+      while (i < len && word[i] != '\'') {
+        result[out_pos++] = word[i++];
+      }
+      if (i < len)
+        i++; // skip closing quote
+    } else if (word[i] == '"') {
+      // Double quotes: allow escapes and variable substitution
+      i++; // skip opening quote
+      while (i < len && word[i] != '"') {
+        if (word[i] == '\\' && i + 1 < len) {
+          char next = word[i + 1];
+          if (next == '"' || next == '\\' || next == '$' || next == '`' ||
+              next == '\n') {
+            result[out_pos++] = next;
+            i += 2;
+          } else {
+            // Backslash is literal if not escaping special char
+            result[out_pos++] = word[i++];
+          }
+        } else {
+          result[out_pos++] = word[i++];
+        }
+      }
+      if (i < len)
+        i++; // skip closing quote
+    } else if (word[i] == '\\' && i + 1 < len) {
+      // Unquoted backslash escape
+      result[out_pos++] = word[i + 1];
+      i += 2;
+    } else {
+      result[out_pos++] = word[i++];
+    }
+  }
+
+  result[out_pos] = '\0';
+  return result;
 }
 
 void print_ast(ASTNode *node, int depth) {
