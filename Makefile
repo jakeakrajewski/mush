@@ -33,3 +33,11 @@ clean:
 	rm -rf $(OBJ_DIR)
 
 .PHONY: all clean
+
+PREFIX ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
+
+install: $(TARGET)
+	install -d $(DESTDIR)$(BINDIR)
+	install -m 755 $(TARGET) $(DESTDIR)$(BINDIR)
+

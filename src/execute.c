@@ -14,13 +14,14 @@
 
 #include "builtins.h"
 #include "execute.h"
-#include "input.h"
 #include "launch.h"
 #include "substitution.h"
 #include "tokenizer.h"
 #include "job_control.h"
 
 extern int debug_substitution;
+
+char *argv_join(char **argv);
 
 int exec_substitute_node(ASTNode *node, int silent) {
   if (debug_substitution) {
@@ -31,7 +32,7 @@ int exec_substitute_node(ASTNode *node, int silent) {
   return execute(node->left, silent);
 }
 
-int exec_bang_node(ASTNode *node, int silent) {
+int exec_bang_node(ASTNode *node) {
   int status = execute(node->left, 1);
   return status == 0 ? 1 : 0;
 }
@@ -49,7 +50,7 @@ int exec_and_node(ASTNode *node, int silent) {
     return status;
 }
 
-int exec_or_node(ASTNode *node, int silent) {
+int exec_or_node(ASTNode *node) {
   int status = execute(node->left, 1);
   if (status != 0)
     return execute(node->right, 0);
@@ -145,8 +146,7 @@ int exec_subshell_node(ASTNode *node, int silent) {
   }
 }
 
-int apply_redirections(ASTNode *node, int saved_stdin, int saved_stdout,
-                       int saved_stderr) {
+int apply_redirections(ASTNode *node) {
   Redirection *r = node->redirs;
   while (r) {
     int fd_target;
@@ -213,7 +213,7 @@ int apply_redirections(ASTNode *node, int saved_stdin, int saved_stdout,
   return 0;
 }
 
-int exec_command_node(ASTNode *node, int silent) {
+int exec_command_node(ASTNode *node) {
   if (debug_substitution) {
     fprintf(stderr, "DEBUG execute: Processing NODE_COMMAND with %d args\n",
             node->argc);
@@ -225,7 +225,7 @@ int exec_command_node(ASTNode *node, int silent) {
   int saved_stderr = dup(STDERR_FILENO);
 
   int status = 0;
-  if (apply_redirections(node, saved_stdin, saved_stdout, saved_stderr) == 1) {
+  if (apply_redirections(node) == 1) {
     status = 1;
     goto cleanup_fds;
   }
@@ -247,10 +247,8 @@ int exec_command_node(ASTNode *node, int silent) {
       }
       free(output);
     } else {
-      
       char *processed = process_quotes(node->args[i].text);
-      argv[argc++] = processed;  // Don't strdup again, process_quotes already allocates
-
+      argv[argc++] = processed;
     }
   }
   argv[argc] = NULL;
@@ -263,8 +261,45 @@ int exec_command_node(ASTNode *node, int silent) {
     fprintf(stderr, "DEBUG execute: argv[%d] = NULL\n", argc);
   }
 
-  status = mu_execute(argv);
+  // Check if it's a builtin command - handle directly without job control
+  if (argv[0]) {
+    for (int i = 0; i < mu_num_builtins(); i++) {
+      if (strcmp(argv[0], builtin_str[i]) == 0) {
+        status = (*builtin_func[i])(argv);
+        goto cleanup_argv;
+      }
+    }
+  }
 
+  // Create job for non-builtin commands
+  if (argv[0] && shell_is_interactive) {
+    job *j = calloc(1, sizeof(job));
+    j->stdin = STDIN_FILENO;
+    j->stdout = STDOUT_FILENO;
+    j->stderr = STDERR_FILENO;
+    j->pgid = 0;
+    j->notified = 0;
+    j->next = first_job;
+    first_job = j;
+
+    // Create process
+    process *p = calloc(1, sizeof(process));
+    p->argv = argv; // Transfer ownership
+    p->next = NULL;
+    j->first_process = p;
+    j->command = strdup(argv_join(argv));
+
+    launch_job(j, 1); // 1 = foreground
+    status = j->first_process->status;
+    
+    // Don't free argv here since job owns it now
+    goto cleanup_fds;
+  } else {
+    // Non-interactive mode or no command
+    status = mu_execute(argv);
+  }
+
+cleanup_argv:
   for (int i = 0; i < argc; i++)
     free(argv[i]);
   free(argv);
@@ -284,18 +319,34 @@ char **ast_to_argv(ASTNode *node) {
     if (!node || node->type != NODE_COMMAND)
         return NULL;
 
-    char **argv = calloc(node->argc + 1, sizeof(char *));
+    char **argv = calloc(node->argc + 64, sizeof(char *));
     if (!argv) return NULL;
 
+    int argc = 0;
+    
     for (int i = 0; i < node->argc; i++) {
         if (node->args[i].is_substitution) {
-            argv[i] = strdup("SUBST"); // placeholder
+            char *output = execute_substitution(node->args[i].substitution_node);
+            
+            if (output && *output) {
+                char *saveptr = NULL;
+                char *token = strtok_r(output, " \t\r\n", &saveptr);
+                while (token != NULL) {
+                    argv[argc++] = strdup(token);
+                    token = strtok_r(NULL, " \t\r\n", &saveptr);
+                }
+            }
+            free(output);
         } else {
-            argv[i] = strdup(node->args[i].text);
+            char *processed = process_quotes(node->args[i].text);
+            argv[argc++] = processed;
         }
     }
-    argv[node->argc] = NULL;
-    return argv;
+    argv[argc] = NULL;
+    
+    // Reallocate to exact size to save memory
+    char **final_argv = realloc(argv, (argc + 1) * sizeof(char *));
+    return final_argv ? final_argv : argv;
 }
 
 char *argv_join(char **argv) {
@@ -331,7 +382,7 @@ job *create_job_from_ast(ASTNode *node) {
 
     // Convert AST command to process list
     process *p = calloc(1, sizeof(process));
-    p->argv = ast_to_argv(node); 
+    p->argv = ast_to_argv(node); // reuse your exec_command_node logic
     p->next = NULL;
 
     j->first_process = p;
@@ -343,13 +394,47 @@ job *create_job_from_ast(ASTNode *node) {
 }
 
 int exec_job_node(ASTNode *node, int silent) {
-    // Background job means run the child node without waiting.
-    job *j = create_job_from_ast(node->left); 
+    if (!shell_is_interactive) {
+        return execute(node->left, silent);
+    }
+
+    job *j = calloc(1, sizeof(job));
     if (!j) {
-        if (!silent)
-            fprintf(stderr, "mu: failed to create job\n");
+        if (!silent) fprintf(stderr, "mu: failed to create job\n");
         return 1;
     }
+    
+    j->stdin = STDIN_FILENO;
+    j->stdout = STDOUT_FILENO;
+    j->stderr = STDERR_FILENO;
+    j->pgid = 0;
+    j->notified = 0;
+    j->is_background = 1;  // Mark as background job
+    j->next = first_job;
+    first_job = j;
+
+    process *p = calloc(1, sizeof(process));
+    if (!p) {
+        free(j);
+        if (!silent) fprintf(stderr, "mu: failed to create process\n");
+        return 1;
+    }
+    
+    p->argv = ast_to_argv(node->left);
+    if (!p->argv) {
+        free(p);
+        free(j);
+        if (!silent) fprintf(stderr, "mu: failed to create argv\n");
+        return 1;
+    }
+    
+    p->next = NULL;
+    p->completed = 0;
+    p->stopped = 0;
+    p->pid = 0;
+
+    j->first_process = p;
+    j->command = argv_join(p->argv);
 
     launch_job(j, 0); // 0 = background
     return 0;
@@ -369,11 +454,11 @@ int execute(ASTNode *node, int silent) {
 
   switch (node->type) {
   case NODE_COMMAND:
-    return exec_command_node(node, silent);
+    return exec_command_node(node);
   case NODE_AND:
     return exec_and_node(node, silent);
   case NODE_OR:
-    return exec_or_node(node, silent);
+    return exec_or_node(node);
   case NODE_SEQUENCE:
     return exec_subshell_node(node, silent);
   case NODE_SUBSHELL:
@@ -381,7 +466,7 @@ int execute(ASTNode *node, int silent) {
   case NODE_PIPE:
     return exec_pipe_node(node, silent);
   case NODE_BANG:
-    return exec_bang_node(node, silent);
+    return exec_bang_node(node);
   case NODE_SUBSTITUTE:
     return exec_substitute_node(node, silent);
   case NODE_JOB:

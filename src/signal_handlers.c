@@ -4,9 +4,6 @@
 #include <sys/wait.h>
 #include <signal.h>
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 extern int shell_is_interactive;
 extern int shell_terminal;
@@ -15,6 +12,7 @@ extern int shell_pgid;
 volatile sig_atomic_t job_notification_pending = 0;
 
 void sigchld_handler(int sig) {
+    (void)sig;
     int status;
     pid_t pid;
     while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED | WCONTINUED)) > 0) {
@@ -24,6 +22,7 @@ void sigchld_handler(int sig) {
 }
 
 void sigint_handler(int sig) {
+    (void)sig;
     // Forward SIGINT to foreground job's process group (if any)
     if (shell_is_interactive) {
         // Send SIGINT to the foreground process group
@@ -35,6 +34,7 @@ void sigint_handler(int sig) {
 }
 
 void sigtstp_handler(int sig) {
+    (void)sig;
     // Forward SIGTSTP (Ctrl-Z) to foreground job's process group
     if (shell_is_interactive) {
         pid_t fg_pgid = tcgetpgrp(shell_terminal);

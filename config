@@ -1,0 +1,73 @@
+# mu shell configuration file
+# This file should be placed at: ~/.config/mu/config
+#
+# Format specifiers for prompt_format:
+#   %t = current time (HH:MM)
+#   %s = status symbol (✓ for success, ✗ for error)
+#   %u = username
+#   %h = hostname
+#   %w = current working directory (abbreviated)
+#   %% = literal %
+
+# Prompt format string
+# Default: "%t %s μ> "
+# Examples:
+#   "%u@%h:%w %s$ "           # user@host:/path ✓$
+#   "%t [%w] %s> "            # 14:30 [~/projects] ✓>
+#   "%s %t μ> "               # ✓ 14:30 μ>
+prompt_format=%t %h %w %s μ> 
+
+# Colors (ANSI escape sequences)
+# You can use standard ANSI color codes:
+# Black: \033[30m    Red: \033[31m      Green: \033[32m   Yellow: \033[33m
+# Blue: \033[34m     Magenta: \033[35m  Cyan: \033[36m    White: \033[37m
+# Bright versions: \033[90m - \033[97m
+# Reset: \033[0m
+
+color_time=\033[33m        # Yellow for time
+color_success=\033[32m     # Green for success symbol
+color_error=\033[31m       # Red for error symbol
+color_username=\033[36m    # Cyan for username
+color_hostname=\033[35m    # Magenta for hostname
+color_directory=\033[34m   # Blue for directory
+color_prompt=\033[0m       # Default/reset for prompt text
+color_reset=\033[0m        # Reset code
+
+# Status symbols
+success_symbol=✓
+error_symbol=✗
+
+# Display options (true/false, yes/no, 1/0)
+show_time=true
+show_status=true
+show_username=true
+show_hostname=true
+show_directory=true
+use_colors=true
+multiline_prompt=false
+
+# Alternative prompt configurations (uncomment to use):
+
+# Minimalist prompt
+# prompt_format=%s> 
+# show_time=false
+
+# Full information prompt
+# prompt_format=%u@%h:%w %t %s$ 
+# show_username=true
+# show_hostname=true
+# show_directory=true
+
+# Git-style prompt
+# prompt_format=(%u) %w %s$ 
+# show_username=true
+# show_directory=true
+# show_time=false
+
+# Colorful rainbow prompt
+# color_time=\033[91m     # Bright red
+# color_success=\033[92m  # Bright green  
+# color_error=\033[91m    # Bright red
+# color_username=\033[94m # Bright blue
+# color_hostname=\033[95m # Bright magenta
+# color_directory=\033[96m # Bright cyan

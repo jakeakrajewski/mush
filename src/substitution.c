@@ -1,4 +1,3 @@
-#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -12,9 +11,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "builtins.h"
 #include "execute.h"
-#include "input.h"
 #include "tokenizer.h"
 
 extern int debug_substitution;

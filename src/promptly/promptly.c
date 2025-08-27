@@ -357,6 +357,7 @@ void handle_tab_completion() {
             }
         }
     } else {
+        // Command completion (your existing code)
         const char *commands[] = {
             "ls", "cd", "pwd", "echo", "cat", "grep", "mkdir", "rmdir", "rm", "cp", "mv", "chmod", "chown",
             "ps", "kill", "jobs", "fg", "bg", "history", "exit", "help", "clear", "date", "whoami", "which",

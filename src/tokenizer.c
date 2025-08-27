@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 char *process_quotes(const char *word);
 
@@ -64,6 +65,8 @@ char *expand_tilde(const char *word) {
         return result;
     }
     
+    // TODO: implement user lookup with getpwnam()
+    // For now, just return the original word
     return strdup(word);
 }
 
@@ -650,54 +653,206 @@ ASTNode *parse_sequence() {
   return left;
 }
 
-
-
-char *process_quotes(const char *word) {
-  size_t len = strlen(word);
-  char *result = malloc(len + 1); // worst case same length
-  size_t out_pos = 0;
-  size_t i = 0;
-
-  while (i < len) {
-    if (word[i] == '\'') {
-      // Single quotes: everything literal until closing quote
-      i++; // skip opening quote
-      while (i < len && word[i] != '\'') {
-        result[out_pos++] = word[i++];
-      }
-      if (i < len)
-        i++; // skip closing quote
-    } else if (word[i] == '"') {
-      // Double quotes: allow escapes and variable substitution
-      i++; // skip opening quote
-      while (i < len && word[i] != '"') {
-        if (word[i] == '\\' && i + 1 < len) {
-          char next = word[i + 1];
-          if (next == '"' || next == '\\' || next == '$' || next == '`' ||
-              next == '\n') {
-            result[out_pos++] = next;
-            i += 2;
-          } else {
-            // Backslash is literal if not escaping special char
-            result[out_pos++] = word[i++];
-          }
+char *expand_variables(const char *input) {
+    if (!input) return NULL;
+    
+    size_t len = strlen(input);
+    size_t capacity = len * 2; // Start with double the input size
+    char *result = malloc(capacity);
+    if (!result) return NULL;
+    
+    size_t out_pos = 0;
+    size_t i = 0;
+    
+    while (i < len) {
+        if (input[i] == '$' && i + 1 < len) {
+            i++; // Skip the $
+            
+            char *var_name = NULL;
+            char *var_value = NULL;
+            
+            if (input[i] == '{') {
+                // ${VAR} format
+                i++; // Skip the {
+                size_t start = i;
+                while (i < len && input[i] != '}') {
+                    i++;
+                }
+                if (i < len && input[i] == '}') {
+                    var_name = strndup(input + start, i - start);
+                    i++; // Skip the }
+                }
+            } else if (input[i] == '$') {
+                // $$ - process ID
+                var_value = malloc(20);
+                snprintf(var_value, 20, "%d", getpid());
+                i++;
+            } else if (input[i] == '?') {
+                // $? - last exit status
+                extern int mu_last_status;
+                var_value = malloc(20);
+                snprintf(var_value, 20, "%d", mu_last_status);
+                i++;
+            } else if (isalnum(input[i]) || input[i] == '_') {
+                // $VAR format - alphanumeric and underscore only
+                size_t start = i;
+                while (i < len && (isalnum(input[i]) || input[i] == '_')) {
+                    i++;
+                }
+                var_name = strndup(input + start, i - start);
+            } else {
+                // Just a $ followed by something else - treat as literal
+                result[out_pos++] = '$';
+                continue;
+            }
+            
+            // Get variable value if we have a name
+            if (var_name && !var_value) {
+                char *env_value = getenv(var_name);
+                if (env_value) {
+                    var_value = strdup(env_value);
+                }
+                free(var_name);
+            }
+            
+            // Append the value or empty string if not found
+            if (var_value) {
+                size_t val_len = strlen(var_value);
+                
+                // Ensure we have enough space
+                while (out_pos + val_len >= capacity) {
+                    capacity *= 2;
+                    char *new_result = realloc(result, capacity);
+                    if (!new_result) {
+                        free(result);
+                        free(var_value);
+                        return NULL;
+                    }
+                    result = new_result;
+                }
+                
+                strcpy(result + out_pos, var_value);
+                out_pos += val_len;
+                free(var_value);
+            }
+            // If variable not found, expand to empty string (standard shell behavior)
+            
         } else {
-          result[out_pos++] = word[i++];
+            // Ensure we have space for one more character
+            if (out_pos + 1 >= capacity) {
+                capacity *= 2;
+                char *new_result = realloc(result, capacity);
+                if (!new_result) {
+                    free(result);
+                    return NULL;
+                }
+                result = new_result;
+            }
+            
+            result[out_pos++] = input[i++];
         }
-      }
-      if (i < len)
-        i++; // skip closing quote
-    } else if (word[i] == '\\' && i + 1 < len) {
-      // Unquoted backslash escape
-      result[out_pos++] = word[i + 1];
-      i += 2;
-    } else {
-      result[out_pos++] = word[i++];
     }
-  }
+    
+    result[out_pos] = '\0';
+    return result;
+}
 
-  result[out_pos] = '\0';
-  return result;
+// Corrected process_quotes function that properly handles single quotes
+char *process_quotes(const char *word) {
+    if (!word) return NULL;
+    
+    size_t len = strlen(word);
+    char *result = malloc(len * 4 + 1);
+    if (!result) return NULL;
+    
+    size_t out_pos = 0;
+    size_t i = 0;
+    
+    // Check if entire word is wrapped in single quotes
+    int entirely_single_quoted = (len >= 2 && word[0] == '\'' && word[len-1] == '\'');
+    
+    if (entirely_single_quoted) {
+        // Copy everything between the single quotes literally - no expansion
+        for (i = 1; i < len - 1; i++) {
+            result[out_pos++] = word[i];
+        }
+        result[out_pos] = '\0';
+        return result;
+    }
+    
+    // Process mixed or unquoted content
+    while (i < len) {
+        if (word[i] == '\'') {
+            // Single quotes within the word - everything literal until closing quote
+            i++; // skip opening quote
+            while (i < len && word[i] != '\'') {
+                result[out_pos++] = word[i++];
+            }
+            if (i < len) i++; // skip closing quote
+            
+        } else if (word[i] == '"') {
+            // Double quotes: process content but allow variable expansion
+            i++; // skip opening quote
+            char *temp = malloc(len * 2);
+            size_t temp_pos = 0;
+            
+            while (i < len && word[i] != '"') {
+                if (word[i] == '\\' && i + 1 < len) {
+                    char next = word[i + 1];
+                    if (next == '"' || next == '\\' || next == '$' || next == '`' || next == '\n') {
+                        temp[temp_pos++] = next;
+                        i += 2;
+                    } else {
+                        temp[temp_pos++] = word[i++];
+                    }
+                } else {
+                    temp[temp_pos++] = word[i++];
+                }
+            }
+            temp[temp_pos] = '\0';
+            
+            // Expand variables in double-quoted content
+            char *expanded = expand_variables(temp);
+            if (expanded) {
+                size_t exp_len = strlen(expanded);
+                // Ensure we have enough space
+                while (out_pos + exp_len >= len * 4) {
+                    len *= 2;
+                    char *new_result = realloc(result, len * 4 + 1);
+                    if (!new_result) {
+                        free(result);
+                        free(expanded);
+                        free(temp);
+                        return NULL;
+                    }
+                    result = new_result;
+                }
+                strcpy(result + out_pos, expanded);
+                out_pos += exp_len;
+                free(expanded);
+            }
+            free(temp);
+            
+            if (i < len) i++; // skip closing quote
+            
+        } else if (word[i] == '\\' && i + 1 < len) {
+            // Unquoted backslash escape
+            result[out_pos++] = word[i + 1];
+            i += 2;
+            
+        } else {
+            // Unquoted content - copy as-is for now
+            result[out_pos++] = word[i++];
+        }
+    }
+    
+    result[out_pos] = '\0';
+    
+    // Expand variables in the unquoted/double-quoted content
+    char *final_result = expand_variables(result);
+    free(result);
+    
+    return final_result ? final_result : strdup("");
 }
 
 void print_ast(ASTNode *node, int depth) {

@@ -1,4 +1,3 @@
-#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -9,18 +8,14 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <time.h>
 #include <unistd.h>
 
 #include "builtins.h"
-#include "input.h"
-#include "substitution.h"
-#include "tokenizer.h"
 
 extern int debug_substitution;
 
 int mu_launch(char **args) {
-  pid_t pid, wpid;
+  pid_t pid;
   int status;
 
   if (debug_substitution) {
@@ -52,7 +47,7 @@ int mu_launch(char **args) {
   } else {
     // Parent process
     do {
-      wpid = waitpid(pid, &status, WUNTRACED);
+      // wpid = waitpid(pid, &status, WUNTRACED);
     } while (!WIFEXITED(status) && !WIFSIGNALED(status));
 
     int exit_status = WEXITSTATUS(status);

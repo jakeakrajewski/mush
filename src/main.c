@@ -8,6 +8,7 @@
 #include "promptly/promptly.h"
 #include "promptly/prompt.h"
 #include "promptly/history.h"
+#include "promptly/config.h"
 #include "job_control.h"
 
 #define MU_RL_BUFSIZE 1024
@@ -23,6 +24,8 @@ int debug_substitution = 0;
 int main() {
     mu_init();
     setup_signal_handlers();
+    init_config();
+
     char *line;
     
     while (1) {
@@ -31,7 +34,7 @@ int main() {
             
         restore_terminal_control();
         
-        // Notify immediately if any job status changed (set by SIGCHLD handler)
+        //TODO: Notify immediately if any job status changed (set by SIGCHLD handler)
         if (job_notification_pending) {
             do_job_notification();
             job_notification_pending = 0;

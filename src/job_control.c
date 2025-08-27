@@ -161,7 +161,9 @@ void launch_job(job *j, int foreground) {
     infile = mypipe[0];
   }
 
-  format_job_info(j, "launched");
+  if (!foreground) {
+    format_job_info(j, "launched");
+  }
 
   if (!shell_is_interactive)
     wait_for_job(j);
@@ -182,8 +184,17 @@ void put_job_in_foreground(job *j, int cont) {
   /* Send the job a continue signal, if necessary.  */
   if (cont) {
     tcsetattr(shell_terminal, TCSADRAIN, &j->tmodes);
-    if (kill(-j->pgid, SIGCONT) < 0)
-      perror("kill (SIGCONT)");
+    
+    // Check if process group still exists before sending SIGCONT
+    if (kill(-j->pgid, 0) == 0) {
+      // Process group exists, safe to send SIGCONT
+      if (kill(-j->pgid, SIGCONT) < 0)
+        perror("kill (SIGCONT)");
+    } else {
+      // Process group doesn't exist - job is likely already dead
+      fprintf(stderr, "mu: fg: job process group no longer exists\n");
+      return;
+    }
   }
 
   /* Wait for it to report.  */
@@ -192,12 +203,10 @@ void put_job_in_foreground(job *j, int cont) {
   /* Put the shell back in the foreground.  */
   tcsetpgrp(shell_terminal, shell_pgid);
 
-  /* Restore the shell’s terminal modes.  */
+  /* Restore the shell's terminal modes.  */
   tcgetattr(shell_terminal, &j->tmodes);
   tcsetattr(shell_terminal, TCSADRAIN, &shell_tmodes);
-}
-
-/* Put a job in the background.  If the cont argument is true, send
+}/* Put a job in the background.  If the cont argument is true, send
    the process group a SIGCONT signal to wake it up.  */
 
 void put_job_in_background(job *j, int cont) {
@@ -225,7 +234,7 @@ int mark_process_status(pid_t pid, int status) {
           else {
             p->completed = 1;
             if (WIFSIGNALED(status))
-              fprintf(stderr, "%d: Terminated by signal %d.\n", (int)pid,
+              fprintf(stderr, "\n%d: Terminated by signal %d.\n", (int)pid,
                       WTERMSIG(p->status));
           }
           return 0;
@@ -279,33 +288,29 @@ void format_job_info(job *j, const char *status) {
 void do_job_notification(void) {
   job *j, *jlast, *jnext;
 
-  /* Update status information for child processes.  */
   update_status();
 
   jlast = NULL;
   for (j = first_job; j; j = jnext) {
     jnext = j->next;
 
-    /* If all processes have completed, tell the user the job has
-       completed and delete it from the list of active jobs.  */
     if (job_is_completed(j)) {
-      format_job_info(j, "completed");
+      // Only notify about background jobs
+      if (j->is_background) {
+        format_job_info(j, "completed");
+      }
+      
       if (jlast)
         jlast->next = jnext;
       else
         first_job = jnext;
       free_job(j);
     }
-
-    /* Notify the user about stopped jobs,
-       marking them so that we won’t do this more than once.  */
     else if (job_is_stopped(j) && !j->notified) {
       format_job_info(j, "stopped");
       j->notified = 1;
       jlast = j;
     }
-
-    /* Don’t say anything about jobs that are still running.  */
     else
       jlast = j;
   }
