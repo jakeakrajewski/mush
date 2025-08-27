@@ -248,9 +248,6 @@ echo 'Hello $USER'  # Outputs: Hello $USER
 
 # Double quotes allow variable expansion
 echo "Hello $USER"  # Outputs: Hello username
-
-# Escape sequences
-echo "Line 1\nLine 2"  # Outputs on separate lines
 ```
 
 ### Debugging
